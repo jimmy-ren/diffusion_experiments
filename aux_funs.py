@@ -4,8 +4,9 @@ import torch
 # alpha [0 1], time_step >= 0
 def noisify(imgs, alpha, time_step):
     rand_n = torch.randn(imgs.shape)
-    if imgs.is_cuda:
-        rand_n = rand_n.to(imgs.device)
+    # make sure rand_n is stored on the same device as imgs
+    rand_n = rand_n.to(imgs.device)
+
     alpha_bar = torch.pow(alpha, time_step)
     #alpha_bar = alpha_bar[:, None, None, None]
     out = imgs * torch.sqrt(alpha_bar) + rand_n * torch.sqrt(1 - alpha_bar)
@@ -59,8 +60,9 @@ def reverse_proc_sampling(x_t, x_0, alpha, time_step):
             torch.sqrt(alpha_bar_to_ts) * (1 - alpha) * x_0) / (1 - alpha_bar_from_ts)
     variance = (1 - alpha) * (1 - alpha_bar_to_ts) / (1 - alpha_bar_from_ts)
     rand_n = torch.randn(x_0.shape)
-    if x_0.is_cuda:
-        rand_n = rand_n.to(x_0.device)
+    # make sure rand_n is stored on the same device as x_0
+    rand_n = rand_n.to(x_0.device)
+
     ret = mean + torch.sqrt(variance) * rand_n
     return ret
 

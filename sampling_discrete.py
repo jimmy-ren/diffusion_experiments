@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 n_diff_steps = 100
 Q = torch.tensor([0.99, 0.01, 0.01, 0.99])
 Q = torch.reshape(Q, [2, 2])
-FILE = './save/model_discrete_epoch_15.pth'
+FILE = './save/model_discrete_epoch_10.pth'
 
 # device
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')

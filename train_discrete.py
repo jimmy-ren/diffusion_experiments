@@ -1,9 +1,10 @@
 import matplotlib.pyplot as plt
 import torchvision
 import torchvision.transforms as transforms
+import time
 from main_network import*
 
-num_epochs = 15
+num_epochs = 10
 batch_size = 100
 learning_rate = 0.001
 Q = torch.tensor([0.99, 0.01, 0.01, 0.99])
@@ -34,8 +35,8 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 # training loop
 n_total_steps = len(train_loader)
-Q = torch.tensor(Q, requires_grad=False)
 for epoch in range(num_epochs):
+    start_time = time.time()  # Record start time
     for i, (images, labels) in enumerate(train_loader):
         # size [batch_size, 1, 28, 28]
         image_batch = images
@@ -58,7 +59,7 @@ for epoch in range(num_epochs):
 
         random_step = torch.randint(low=1, high=n_diff_steps + 1, size=(1,))
         noisy_image_batch = noisify_discrete(image_batch, Q, random_step.item())
-        random_step = torch.tensor(random_step).to(device)
+        random_step = random_step.to(device)
 
         noisy_image_batch = noisy_image_batch.to(device)
         train_labels = image_batch[:, 1, :, :].long()
@@ -80,4 +81,7 @@ for epoch in range(num_epochs):
     # save checkpoint for each epoch
     FILE = f'./save/model_discrete_epoch_{epoch + 1}.pth'
     torch.save(model.state_dict(), FILE)
+    end_time = time.time()  # Record end time
+    elapsed_time = end_time - start_time  # Calculate elapsed time
+    print(f"Elapsed time for one epoch: {elapsed_time:.6f} seconds")
 

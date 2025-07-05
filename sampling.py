@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 n_diff_steps = 100
 alpha = 0.99
-FILE = './save/model_cont_epoch_15.pth'
+FILE = './save/model_cont_epoch_10.pth'
 # device
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 model = Unet()
