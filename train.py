@@ -1,13 +1,19 @@
+import sys
+
 import torchvision
 import torchvision.transforms as transforms
 import time
 from main_network import*
 
+#some config
 num_epochs = 10
 batch_size = 100
 learning_rate = 0.001
 alpha = 0.99
 n_diff_steps = 100
+
+label_type = 'image'
+#label_type = 'noise'
 
 # MNIST dataset
 train_dataset = torchvision.datasets.MNIST(root='./data', train=True, transform=transforms.ToTensor(),
@@ -38,22 +44,31 @@ for epoch in range(num_epochs):
         # size [batch_size, 1, 28, 28]
         image_batch = images
         random_step = torch.randint(low=1, high=n_diff_steps + 1, size=(1,))
-        noisy_image_batch = noisify(image_batch, alpha, random_step)
+
+        noisy_image_batch, ori_noise = noisify(image_batch, alpha, random_step)
         random_step = random_step.to(device)
+        noisy_image_batch = noisy_image_batch.to(device)
+
+        # forward
+        outputs = model(noisy_image_batch, random_step)
+
+        if label_type == 'image':
+            images = images.to(device)
+            loss = criterion(outputs, images)
+            FILE = f'./save/model_cont_predimg_epoch_{epoch + 1}.pth'
+        elif label_type == 'noise':
+            ori_noise = ori_noise.to(device)
+            loss = criterion(outputs, ori_noise)
+            FILE = f'./save/model_cont_prednoise_epoch_{epoch + 1}.pth'
+        else:
+            # something is wrong
+            sys.exit()
 
         '''
         for i in range(6):
             plt.subplot(2, 3, i+1)
             plt.imshow(noisy_image_batch[i][0], cmap='gray')
         '''
-        # sys.exit()
-
-        noisy_image_batch = noisy_image_batch.to(device)
-        images = images.to(device)
-
-        # forward
-        outputs = model(noisy_image_batch, random_step)
-        loss = criterion(outputs, images)
 
         # backward
         loss.backward()
@@ -64,7 +79,6 @@ for epoch in range(num_epochs):
             print(f'epoch {epoch + 1}/{num_epochs}, step {i + 1}/{n_total_steps}, loss={loss.item():.4f}')
 
     # save checkpoint for each epoch
-    FILE = f'./save/model_cont_epoch_{epoch + 1}.pth'
     torch.save(model.state_dict(), FILE)
     end_time = time.time()  # Record end time
     elapsed_time = end_time - start_time  # Calculate elapsed time
