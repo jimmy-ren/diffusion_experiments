@@ -6,11 +6,15 @@ import time
 from main_network import*
 
 #some config
-num_epochs = 10
+num_epochs = 200
 batch_size = 100
-learning_rate = 0.001
-alpha = 0.99
+learning_rate = 0.0006
 n_diff_steps = 100
+alpha_min = 0.8
+alpha_max = 0.9999
+alpha_schedule = torch.linspace(alpha_max, alpha_min, n_diff_steps)
+#alpha = 0.99
+
 
 label_type = 'image'
 #label_type = 'noise'
@@ -37,15 +41,15 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 # training loop
 n_total_steps = len(train_loader)
-alpha = torch.tensor(alpha, requires_grad=False)
 for epoch in range(num_epochs):
     start_time = time.time()  # Record start time
     for i, (images, labels) in enumerate(train_loader):
         # size [batch_size, 1, 28, 28]
         image_batch = images
+        # steps in [1, 100]
         random_step = torch.randint(low=1, high=n_diff_steps + 1, size=(1,))
 
-        noisy_image_batch, ori_noise = noisify(image_batch, alpha, random_step)
+        noisy_image_batch, ori_noise = noisify(image_batch, alpha_schedule, random_step)
         random_step = random_step.to(device)
         noisy_image_batch = noisy_image_batch.to(device)
 

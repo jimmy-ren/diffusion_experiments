@@ -2,12 +2,12 @@ import torch
 
 # imgs nchw
 # alpha [0 1], time_step >= 0
-def noisify(imgs, alpha, time_step):
+def noisify(imgs, alpha_schedule, time_step):
     rand_n = torch.randn(imgs.shape)
     # make sure rand_n is stored on the same device as imgs
     rand_n = rand_n.to(imgs.device)
 
-    alpha_bar = torch.pow(alpha, time_step)
+    alpha_bar = torch.prod(alpha_schedule[0:time_step])
     #alpha_bar = alpha_bar[:, None, None, None]
     out = imgs * torch.sqrt(alpha_bar) + rand_n * torch.sqrt(1 - alpha_bar)
     return out, rand_n
@@ -49,22 +49,22 @@ def noisify_discrete(imgs, Q, time_step, return_onehot=True):
     return ret
 
 # x_t, x_0, nchw
-def reverse_proc_sampling(x_t, x_0, alpha, time_step, label_type='image'):
+def reverse_proc_sampling(x_t, x_0, alpha_schedule, time_step, label_type='image'):
     # from time step: t
     # to time step: t-1
     from_ts = time_step + 1
     to_ts = time_step
-    alpha_bar_from_ts = torch.pow(alpha, from_ts)
-    alpha_bar_to_ts = torch.pow(alpha, to_ts)
+    alpha_bar_from_ts = torch.prod(alpha_schedule[0:from_ts])
+    alpha_bar_to_ts = torch.prod(alpha_schedule[0:to_ts])
     if label_type == 'image':
-        mean = (torch.sqrt(alpha) * (1 - alpha_bar_to_ts) * x_t + \
-                torch.sqrt(alpha_bar_to_ts) * (1 - alpha) * x_0) / (1 - alpha_bar_from_ts)
+        mean = (torch.sqrt(alpha_schedule[time_step]) * (1 - alpha_bar_to_ts) * x_t + \
+                torch.sqrt(alpha_bar_to_ts) * (1 - alpha_schedule[time_step]) * x_0) / (1 - alpha_bar_from_ts)
     elif label_type == 'noise':
-        mean = (1 / torch.sqrt(alpha)) * x_t - (1 - alpha) / (torch.sqrt(1 - alpha_bar_from_ts) * (torch.sqrt(alpha))) * x_0
+        mean = (1 / torch.sqrt(alpha_schedule[time_step])) * x_t - (1 - alpha_schedule[time_step]) / (torch.sqrt(1 - alpha_bar_from_ts) * (torch.sqrt(alpha_schedule[time_step]))) * x_0
     else:
         # something is wrong
         mean = x_0
-    variance = (1 - alpha) * (1 - alpha_bar_to_ts) / (1 - alpha_bar_from_ts)
+    variance = (1 - alpha_schedule[time_step]) * (1 - alpha_bar_to_ts) / (1 - alpha_bar_from_ts)
     rand_n = torch.randn(x_0.shape)
     # make sure rand_n is stored on the same device as x_0
     rand_n = rand_n.to(x_0.device)
