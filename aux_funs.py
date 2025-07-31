@@ -72,9 +72,39 @@ def reverse_proc_sampling(x_t, x_0, alpha_schedule, time_step, label_type='image
     ret = mean + torch.sqrt(variance) * rand_n
     return ret
 
+# x_t, nchw, one-hot encoding
+# x_0_prob nchw, in the probability form
+# Q is a mxm state transition matrix
+# currently, this function only works for data label with only two classes
+def reverse_proc_sampling_discrete(x_t, x_0_prob, Q, time_step):
+    # transpose Q
+    Qt = torch.transpose(Q, 0, 1)
+    p1 = noisify_discrete(x_t, Qt, 1, return_onehot=False)
+
+    s = x_t.shape
+    ones_ch = torch.ones([s[0], 1, s[2], s[3]])
+    zeros_ch = torch.zeros([s[0], 1, s[2], s[3]])
+
+    x_0_one_hot_class_0 = torch.cat((ones_ch, zeros_ch), dim=1)
+    p2_a = noisify_discrete(x_0_one_hot_class_0, Q, time_step, return_onehot=False)
+    p2_a = p2_a * x_0_prob[:, 0:1, :, :]
+
+    x_0_one_hot_class_1 = torch.cat((zeros_ch, ones_ch), dim=1)
+    p2_b = noisify_discrete(x_0_one_hot_class_1, Q, time_step, return_onehot=False)
+    p2_b = p2_b * x_0_prob[:, 1:2, :, :]
+
+    p2 = p2_a + p2_b
+
+    ret = torch.mul(p1, p2)
+    # normalize
+    sum = torch.sum(ret, dim=1, keepdim=True)
+    ret = ret / sum
+    ret = prob_to_onehot(ret)
+    return ret
+
 # x_t, x_0 nchw, one-hot encoding
 # Q is a mxm state transition matrix
-def reverse_proc_sampling_discrete(x_t, x_0, Q, time_step):
+def reverse_proc_sampling_discrete_v2(x_t, x_0, Q, time_step):
     # transpose Q
     Qt = torch.transpose(Q, 0, 1)
     p1 = noisify_discrete(x_t, Qt, 1, return_onehot=False)

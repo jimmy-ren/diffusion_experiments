@@ -26,8 +26,11 @@ with torch.no_grad():
     for i in range(n_diff_steps):
         model_step = torch.full((1,), n_diff_steps - i).to(device)
         outputs = model(inputs, model_step)
-        outputs = model_output_to_onehot(outputs)
-        #inputs = noisify_discrete(outputs, Q, n_diff_steps - i - 1)
+
+        # convert the output to probability
+        outputs = nn.Softmax(dim=1)(outputs)
+
+        outputs = outputs.to('cpu')
         inputs = inputs.to('cpu')
         inputs = reverse_proc_sampling_discrete(inputs, outputs, Q, n_diff_steps - i - 1)
         inputs = inputs.to(device)
@@ -40,7 +43,7 @@ with torch.no_grad():
             plt.axis('off')
         plt.subplots_adjust(wspace=0, hspace=0)
         plt.savefig(f'./plots/discrete_diff_{i}.png')
-        plt.show()
+        #plt.show()
         '''
 
 
