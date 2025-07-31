@@ -4,12 +4,20 @@ import torchvision.transforms as transforms
 import time
 from main_network import*
 
-num_epochs = 10
+num_epochs = 100
 batch_size = 100
-learning_rate = 0.001
-Q = torch.tensor([0.99, 0.01, 0.01, 0.99])
-Q = torch.reshape(Q, [2, 2])
 n_diff_steps = 100
+learning_rate = 0.0006
+alpha_min = 0.95
+alpha_max = 0.99999
+alpha_schedule = torch.linspace(alpha_max, alpha_min, n_diff_steps)
+# construct the transition matrices
+Q_set = torch.zeros([n_diff_steps, 2, 2])
+Q_set[:, 0, 0] = alpha_schedule
+Q_set[:, 1, 1] = alpha_schedule
+Q_set[:, 0, 1] = 1 - alpha_schedule
+Q_set[:, 1, 0] = 1 - alpha_schedule
+Q_bar_set = cumulative_matrix_mul(Q_set)
 
 composed = torchvision.transforms.Compose([transforms.ToTensor(), BinaryOneHotTransform()])
 
@@ -58,7 +66,7 @@ for epoch in range(num_epochs):
         '''
 
         random_step = torch.randint(low=1, high=n_diff_steps + 1, size=(1,))
-        noisy_image_batch = noisify_discrete(image_batch, Q, random_step.item())
+        noisy_image_batch = noisify_discrete(image_batch, Q_bar_set, random_step.item()-1)
         random_step = random_step.to(device)
 
         noisy_image_batch = noisy_image_batch.to(device)

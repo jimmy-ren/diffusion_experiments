@@ -2,9 +2,17 @@ from main_network import *
 import matplotlib.pyplot as plt
 
 n_diff_steps = 100
-Q = torch.tensor([0.99, 0.01, 0.01, 0.99])
-Q = torch.reshape(Q, [2, 2])
-FILE = './save/model_discrete_epoch_10.pth'
+alpha_min = 0.95
+alpha_max = 0.99999
+alpha_schedule = torch.linspace(alpha_max, alpha_min, n_diff_steps)
+# construct the transition matrices
+Q_set = torch.zeros([n_diff_steps, 2, 2])
+Q_set[:, 0, 0] = alpha_schedule
+Q_set[:, 1, 1] = alpha_schedule
+Q_set[:, 0, 1] = 1 - alpha_schedule
+Q_set[:, 1, 0] = 1 - alpha_schedule
+Q_bar_set = cumulative_matrix_mul(Q_set)
+FILE = './save/model_discrete_epoch_100.pth'
 
 # device
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
@@ -30,10 +38,14 @@ with torch.no_grad():
         # convert the output to probability
         outputs = nn.Softmax(dim=1)(outputs)
 
-        outputs = outputs.to('cpu')
-        inputs = inputs.to('cpu')
-        inputs = reverse_proc_sampling_discrete(inputs, outputs, Q, n_diff_steps - i - 1)
-        inputs = inputs.to(device)
+        if i < n_diff_steps - 1:
+            #outputs = model_output_to_onehot(outputs)
+            outputs = outputs.to('cpu')
+            inputs = inputs.to('cpu')
+            # next time step from n_diff_steps - 1 to 1
+            next_time_step = n_diff_steps - i - 1
+            inputs = reverse_proc_sampling_discrete(inputs, outputs, Q_set, Q_bar_set, next_time_step)
+            inputs = inputs.to(device)
 
         '''
         for j in range(100):
@@ -47,7 +59,7 @@ with torch.no_grad():
         '''
 
 
-    inputs = inputs.detach().cpu()
+    #inputs = inputs.detach().cpu()
     outputs = outputs.detach().cpu()
     outputs = model_output_to_onehot(outputs)
 

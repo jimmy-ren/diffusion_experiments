@@ -33,8 +33,8 @@ def prob_to_onehot(prob_imgs):
 
 # imgs nchw, one-hot encoding
 # Q is a mxm state transition matrix
-def noisify_discrete(imgs, Q, time_step, return_onehot=True):
-    Q = torch.matrix_power(Q, time_step)
+def noisify_discrete(imgs, Q_bar_set, time_step, return_onehot=True):
+    Q = Q_bar_set[time_step, :, :]
     Q = torch.reshape(Q, [Q.shape[0], Q.shape[1], 1, 1])
     imgs = imgs.permute(0, 3, 2, 1) # to nwhc
     Qr = Q.repeat([1, 1, imgs.shape[0], imgs.shape[1]]) # repeat batch_size, w times
@@ -74,41 +74,30 @@ def reverse_proc_sampling(x_t, x_0, alpha_schedule, time_step, label_type='image
 
 # x_t, nchw, one-hot encoding
 # x_0_prob nchw, in the probability form
-# Q is a mxm state transition matrix
+# Q_set, Q_bar_set, txmxm state transition matrix
 # currently, this function only works for data label with only two classes
-def reverse_proc_sampling_discrete(x_t, x_0_prob, Q, time_step):
+def reverse_proc_sampling_discrete(x_t, x_0_prob, Q_set, Q_bar_set, time_step):
     # transpose Q
+    Q = Q_set[time_step, :, :]
     Qt = torch.transpose(Q, 0, 1)
-    p1 = noisify_discrete(x_t, Qt, 1, return_onehot=False)
+    # make the dimension compatible with the function noisify_discrete()
+    Qt = torch.reshape(Qt, [1, Q.shape[0], Q.shape[1]])
+    p1 = noisify_discrete(x_t, Qt, 0, return_onehot=False)
 
     s = x_t.shape
     ones_ch = torch.ones([s[0], 1, s[2], s[3]])
     zeros_ch = torch.zeros([s[0], 1, s[2], s[3]])
 
     x_0_one_hot_class_0 = torch.cat((ones_ch, zeros_ch), dim=1)
-    p2_a = noisify_discrete(x_0_one_hot_class_0, Q, time_step, return_onehot=False)
+    p2_a = noisify_discrete(x_0_one_hot_class_0, Q_bar_set, time_step - 1, return_onehot=False)
     p2_a = p2_a * x_0_prob[:, 0:1, :, :]
 
     x_0_one_hot_class_1 = torch.cat((zeros_ch, ones_ch), dim=1)
-    p2_b = noisify_discrete(x_0_one_hot_class_1, Q, time_step, return_onehot=False)
+    p2_b = noisify_discrete(x_0_one_hot_class_1, Q_bar_set, time_step - 1, return_onehot=False)
     p2_b = p2_b * x_0_prob[:, 1:2, :, :]
 
     p2 = p2_a + p2_b
 
-    ret = torch.mul(p1, p2)
-    # normalize
-    sum = torch.sum(ret, dim=1, keepdim=True)
-    ret = ret / sum
-    ret = prob_to_onehot(ret)
-    return ret
-
-# x_t, x_0 nchw, one-hot encoding
-# Q is a mxm state transition matrix
-def reverse_proc_sampling_discrete_v2(x_t, x_0, Q, time_step):
-    # transpose Q
-    Qt = torch.transpose(Q, 0, 1)
-    p1 = noisify_discrete(x_t, Qt, 1, return_onehot=False)
-    p2 = noisify_discrete(x_0, Q, time_step, return_onehot=False)
     ret = torch.mul(p1, p2)
     # normalize
     sum = torch.sum(ret, dim=1, keepdim=True)
@@ -151,3 +140,15 @@ def get_time_embedding(time_steps: torch.Tensor, t_emb_dim: int) -> torch.Tensor
     t_emb = torch.cat([torch.sin(t_emb), torch.cos(t_emb)], dim=1)  # (B , t_emb_dim)
 
     return t_emb
+
+# matrices, nwh
+def cumulative_matrix_mul(matrices):
+    num_of_matrices = matrices.shape[0]
+    cumulative_matrices = torch.zeros(matrices.shape)
+    current_product = matrices[0, :, :]
+    for i in range(num_of_matrices):
+        cumulative_matrices[i, :, :] = current_product
+        if i != num_of_matrices - 1:
+            current_product = torch.matmul(current_product, matrices[i+1, :, :])
+
+    return cumulative_matrices
