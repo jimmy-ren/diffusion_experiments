@@ -12,7 +12,7 @@ Q_set[:, 1, 1] = alpha_schedule
 Q_set[:, 0, 1] = 1 - alpha_schedule
 Q_set[:, 1, 0] = 1 - alpha_schedule
 Q_bar_set = cumulative_matrix_mul(Q_set)
-FILE = './save/model_discrete_epoch_100.pth'
+FILE = './save/model_discrete_epoch_200.pth'
 
 # device
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')

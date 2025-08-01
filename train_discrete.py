@@ -4,7 +4,7 @@ import torchvision.transforms as transforms
 import time
 from main_network import*
 
-num_epochs = 100
+num_epochs = 200
 batch_size = 100
 n_diff_steps = 100
 learning_rate = 0.0006
