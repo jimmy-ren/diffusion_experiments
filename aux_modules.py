@@ -12,7 +12,9 @@ class NormActConv(nn.Module):
                  num_groups: int = 8,
                  kernel_size: int = 3,
                  norm: bool = True,
-                 act: bool = True
+                 act: bool = True,
+                 dropout: bool = True,
+                 dropout_prob: float = 0.1
                  ):
         super(NormActConv, self).__init__()
 
@@ -25,6 +27,8 @@ class NormActConv(nn.Module):
         # Activation
         self.act = nn.SiLU() if act is True else nn.Identity()
 
+        self.dropout = nn.Dropout(p=dropout_prob) if dropout else nn.Identity()
+
         # Convolution
         self.conv = nn.Conv2d(
             in_channels,
@@ -36,6 +40,7 @@ class NormActConv(nn.Module):
     def forward(self, x):
         x = self.g_norm(x)
         x = self.act(x)
+        x = self.dropout(x)
         x = self.conv(x)
         return x
 
@@ -59,6 +64,42 @@ class TimeEmbedding(nn.Module):
 
     def forward(self, x):
         return self.te_block(x)
+
+
+class SelfAttentionBlock(nn.Module):
+    """
+    Perform GroupNorm and Multiheaded Self Attention operation.
+    """
+
+    def __init__(self,
+                 num_channels: int,
+                 num_groups: int = 8,
+                 num_heads: int = 4,
+                 norm: bool = True
+                 ):
+        super(SelfAttentionBlock, self).__init__()
+
+        # GroupNorm
+        self.g_norm = nn.GroupNorm(
+            num_groups,
+            num_channels
+        ) if norm is True else nn.Identity()
+
+        # Self-Attention
+        self.attn = nn.MultiheadAttention(
+            num_channels,
+            num_heads,
+            batch_first=True
+        )
+
+    def forward(self, x):
+        batch_size, channels, h, w = x.shape
+        x = x.reshape(batch_size, channels, h * w)
+        x = self.g_norm(x)
+        x = x.transpose(1, 2)
+        x, _ = self.attn(x, x, x)
+        x = x.transpose(1, 2).reshape(batch_size, channels, h, w)
+        return x
 
 class Downsample(nn.Module):
     """
@@ -122,7 +163,7 @@ class Upsample(nn.Module):
                  out_channels: int,
                  k: int = 2,  # Upsampling factor
                  use_conv: bool = True,  # Upsampling using conv-block
-                 use_upsample: bool = True  # Upsampling using nn.upsample
+                 use_upsample: bool = False  # Upsampling using nn.upsample
                  ):
         super(Upsample, self).__init__()
 
@@ -190,11 +231,13 @@ class DownC(nn.Module):
                  out_channels: int,
                  t_emb_dim: int = 128,  # Time Embedding Dimension
                  num_layers: int = 2,
-                 down_sample: bool = True  # True for Downsampling
+                 down_sample: bool = True,  # True for Downsampling
+                 enable_attention: bool = True
                  ):
         super(DownC, self).__init__()
 
         self.num_layers = num_layers
+        self.enable_attention = enable_attention
 
         self.conv1 = nn.ModuleList([
             NormActConv(in_channels if i == 0 else out_channels,
@@ -210,6 +253,10 @@ class DownC(nn.Module):
 
         self.te_block = nn.ModuleList([
             TimeEmbedding(out_channels, t_emb_dim) for _ in range(num_layers)
+        ])
+
+        self.attn_block = nn.ModuleList([
+            SelfAttentionBlock(out_channels) for _ in range(num_layers)
         ])
 
         self.down_block = Downsample(out_channels, out_channels) if down_sample else nn.Identity()
@@ -234,6 +281,11 @@ class DownC(nn.Module):
             out = self.conv2[i](out)
             out = out + self.res_block[i](resnet_input)
 
+            if self.enable_attention:
+                # Self Attention
+                out_attn = self.attn_block[i](out)
+                out = out + out_attn
+
         # Downsampling
         out = self.down_block(out)
 
@@ -253,11 +305,13 @@ class MidC(nn.Module):
                  in_channels: int,
                  out_channels: int,
                  t_emb_dim: int = 128,
-                 num_layers: int = 2
+                 num_layers: int = 2,
+                 enable_attention: bool = True
                  ):
         super(MidC, self).__init__()
 
         self.num_layers = num_layers
+        self.enable_attention = enable_attention
 
         self.conv1 = nn.ModuleList([
             NormActConv(in_channels if i == 0 else out_channels,
@@ -273,6 +327,10 @@ class MidC(nn.Module):
 
         self.te_block = nn.ModuleList([
             TimeEmbedding(out_channels, t_emb_dim) for _ in range(num_layers + 1)
+        ])
+
+        self.attn_block = nn.ModuleList([
+            SelfAttentionBlock(out_channels) for _ in range(num_layers)
         ])
 
         self.res_block = nn.ModuleList([
@@ -295,9 +353,10 @@ class MidC(nn.Module):
 
         # Sequence of Self-Attention + Resnet Blocks
         for i in range(self.num_layers):
-            # Self Attention
-            # out_attn = self.attn_block[i](out)
-            # out = out + out_attn
+            if self.enable_attention:
+                # Self Attention
+                out_attn = self.attn_block[i](out)
+                out = out + out_attn
 
             # Resnet Block
             resnet_input = out
@@ -325,11 +384,13 @@ class UpC(nn.Module):
                  out_channels: int,
                  t_emb_dim: int = 128,  # Time Embedding Dimension
                  num_layers: int = 2,
-                 up_sample: bool = True  # True for Upsampling
+                 up_sample: bool = True,  # True for Upsampling
+                 enable_attention: bool = True
                  ):
         super(UpC, self).__init__()
 
         self.num_layers = num_layers
+        self.enable_attention = enable_attention
 
         self.conv1 = nn.ModuleList([
             NormActConv(in_channels if i == 0 else out_channels,
@@ -345,6 +406,10 @@ class UpC(nn.Module):
 
         self.te_block = nn.ModuleList([
             TimeEmbedding(out_channels, t_emb_dim) for _ in range(num_layers)
+        ])
+
+        self.attn_block = nn.ModuleList([
+            SelfAttentionBlock(out_channels) for _ in range(num_layers)
         ])
 
         self.up_block = Upsample(in_channels, in_channels // 2) if up_sample else nn.Identity()
@@ -370,6 +435,11 @@ class UpC(nn.Module):
             out = self.conv1[i](out)
             out = out + self.te_block[i](t_emb)[:, :, None, None]
             out = self.conv2[i](out)
-            out = out + self.res_block[i](resnet_input)
+            out = out + self.res_block[i](resnet_input)\
+
+            if self.enable_attention:
+                # Self Attention
+                out_attn = self.attn_block[i](out)
+                out = out + out_attn
 
         return out

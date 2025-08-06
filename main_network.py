@@ -12,13 +12,14 @@ class Unet(nn.Module):
     def __init__(self,
                  im_channels: int = 1, # RGB
                  down_ch: list = [32, 64, 128, 256],
-                 mid_ch: list = [256, 256, 128],
+                 mid_ch: list = [256, 256, 256],
                  up_ch: list[int] = [256, 128, 64, 16],
-                 down_sample: list[bool] = [True, True, False],
+                 down_sample: list[bool] = [True, True, True],
                  t_emb_dim: int = 128,
                  num_downc_layers :int = 2,
                  num_midc_layers :int = 2,
-                 num_upc_layers :int = 2
+                 num_upc_layers :int = 2,
+                 enable_attention:bool = True
                  ):
         super(Unet, self).__init__()
 
@@ -31,6 +32,7 @@ class Unet(nn.Module):
         self.num_downc_layers = num_downc_layers
         self.num_midc_layers = num_midc_layers
         self.num_upc_layers = num_upc_layers
+        self.enable_attention = enable_attention
 
         self.up_sample = list(reversed(self.down_sample)) # [False, True, True]
 
@@ -48,10 +50,11 @@ class Unet(nn.Module):
         self.downs = nn.ModuleList([
             DownC(
                 self.down_ch[i],
-                self.down_ch[ i +1],
+                self.down_ch[i+1],
                 self.t_emb_dim,
                 self.num_downc_layers,
-                self.down_sample[i]
+                self.down_sample[i],
+                self.enable_attention
             ) for i in range(len(self.down_ch) - 1)
         ])
 
@@ -59,9 +62,10 @@ class Unet(nn.Module):
         self.mids = nn.ModuleList([
             MidC(
                 self.mid_ch[i],
-                self.mid_ch[ i +1],
+                self.mid_ch[i+1],
                 self.t_emb_dim,
-                self.num_midc_layers
+                self.num_midc_layers,
+                self.enable_attention
             ) for i in range(len(self.mid_ch) - 1)
         ])
 
@@ -69,10 +73,11 @@ class Unet(nn.Module):
         self.ups = nn.ModuleList([
             UpC(
                 self.up_ch[i],
-                self.up_ch[ i +1],
+                self.up_ch[i+1],
                 self.t_emb_dim,
                 self.num_upc_layers,
-                self.up_sample[i]
+                self.up_sample[i],
+                self.enable_attention
             ) for i in range(len(self.up_ch) - 1)
         ])
 
