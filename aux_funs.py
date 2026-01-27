@@ -1,14 +1,14 @@
 import torch
 
 # imgs nchw
-# alpha [0 1], time_step >= 0
-def noisify(imgs, alpha_schedule, time_step):
+# alpha [0 1], 1 <= time_step <= diff steps
+def noisify(imgs, alphas_cumprod, time_step):
     rand_n = torch.randn(imgs.shape)
     # make sure rand_n is stored on the same device as imgs
     rand_n = rand_n.to(imgs.device)
 
-    alpha_bar = torch.prod(alpha_schedule[0:time_step])
-    #alpha_bar = alpha_bar[:, None, None, None]
+    alpha_bar = alphas_cumprod[time_step-1]
+    alpha_bar = alpha_bar.view(-1, 1, 1, 1)
     out = imgs * torch.sqrt(alpha_bar) + rand_n * torch.sqrt(1 - alpha_bar)
     return out, rand_n
 
@@ -152,3 +152,13 @@ def cumulative_matrix_mul(matrices):
             current_product = torch.matmul(current_product, matrices[i+1, :, :])
 
     return cumulative_matrices
+
+def get_gradient_norm(model):
+    total_norm = 0.0
+    for p in model.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.detach().data.norm(2)
+            total_norm += param_norm.item() ** 2
+    return total_norm ** 0.5
+
+

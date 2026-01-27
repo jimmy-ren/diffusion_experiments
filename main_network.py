@@ -11,15 +11,15 @@ class Unet(nn.Module):
 
     def __init__(self,
                  im_channels: int = 1, # RGB
-                 down_ch: list = [32, 64, 128, 256],
+                 down_ch: list = [128, 256, 256, 256],
                  mid_ch: list = [256, 256, 256],
-                 up_ch: list[int] = [256, 128, 64, 16],
-                 down_sample: list[bool] = [True, True, True],
+                 up_ch: list[int] = [256, 256, 256, 128],
+                 down_sample: list[bool] = [True, True, False],
                  t_emb_dim: int = 128,
                  num_downc_layers :int = 2,
                  num_midc_layers :int = 2,
                  num_upc_layers :int = 2,
-                 enable_attention:bool = True
+                 attention_mode :str = 'OFF'
                  ):
         super(Unet, self).__init__()
 
@@ -32,7 +32,23 @@ class Unet(nn.Module):
         self.num_downc_layers = num_downc_layers
         self.num_midc_layers = num_midc_layers
         self.num_upc_layers = num_upc_layers
-        self.enable_attention = enable_attention
+
+        if attention_mode == 'OFF':
+            enable_down_attention: list[bool] = [False, False, False]
+            enable_mid_attention: list[bool] = [False, False, False]
+            enable_up_attention: list[bool] = [False, False, False]
+        elif attention_mode == 'ON':
+            enable_down_attention: list[bool] = [True, True, True]
+            enable_mid_attention: list[bool] = [True, True, True]
+            enable_up_attention: list[bool] = [True, True, True]
+        else:
+            enable_down_attention: list[bool] = [True, True, True]
+            enable_mid_attention: list[bool] = [False, False, False]
+            enable_up_attention: list[bool] = [True, True, True]
+
+        self.enable_down_attention = enable_down_attention
+        self.enable_mid_attention = enable_mid_attention
+        self.enable_up_attention = enable_up_attention
 
         self.up_sample = list(reversed(self.down_sample)) # [False, True, True]
 
@@ -54,7 +70,7 @@ class Unet(nn.Module):
                 self.t_emb_dim,
                 self.num_downc_layers,
                 self.down_sample[i],
-                self.enable_attention
+                self.enable_down_attention[i]
             ) for i in range(len(self.down_ch) - 1)
         ])
 
@@ -65,7 +81,7 @@ class Unet(nn.Module):
                 self.mid_ch[i+1],
                 self.t_emb_dim,
                 self.num_midc_layers,
-                self.enable_attention
+                self.enable_mid_attention[i]
             ) for i in range(len(self.mid_ch) - 1)
         ])
 
@@ -74,10 +90,11 @@ class Unet(nn.Module):
             UpC(
                 self.up_ch[i],
                 self.up_ch[i+1],
+                self.down_ch[len(self.down_ch)-i-2],
                 self.t_emb_dim,
                 self.num_upc_layers,
                 self.up_sample[i],
-                self.enable_attention
+                self.enable_up_attention[i]
             ) for i in range(len(self.up_ch) - 1)
         ])
 
