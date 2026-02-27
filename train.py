@@ -8,7 +8,7 @@ from main_network import*
 
 #some config
 num_epochs = 15000
-batch_size = 128
+batch_size = 100
 learning_rate = 0.0002
 n_diff_steps = 1000
 # alpha_min 0.8 for 100 steps, 0.98 for 1000 steps
@@ -69,7 +69,7 @@ total_params = sum(p.numel() for p in model.parameters())
 print(f"Total number of parameters: {total_params}")
 
 # load weights
-#FILE = f'./save/{dataset}/model_cont_prednoise_epoch_1900.pth'
+#FILE = f'./save/{dataset}/model_cont_prednoise_1000steps_epoch_1800_v10_2.pth'
 #print(f'loading weights: {FILE}')
 #model.load_state_dict(torch.load(FILE, weights_only=True, map_location='cpu'))
 model = model.to(device)
