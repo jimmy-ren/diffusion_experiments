@@ -161,4 +161,83 @@ def get_gradient_norm(model):
             total_norm += param_norm.item() ** 2
     return total_norm ** 0.5
 
+def normalize_mu(mu, assumed_range=(-2, 2)):
+    """
+    Normalize μ from assumed VAE range to [-1, 1]
+    """
+    low, high = assumed_range
+    # Clamp to prevent outliers from going outside grid
+    mu_clamped = torch.clamp(mu, low, high)
+    # Linear mapping: [low, high] -> [-1, 1]
+    mu_normalized = 2 * (mu_clamped - low) / (high - low) - 1
+
+    return mu_normalized
+
+
+def get_patch_coordinates(image_size=28, patch_size=7, stride=1, device='cpu'):
+    """
+    Get row and column coordinates for all patches in the grid.
+
+    Args:
+        image_size: int, size of input image (assumed square)
+        patch_size: int, size of patches
+        stride: int, stride for unfolding
+        device: torch device
+
+    Returns:
+        rows: torch.Tensor of shape (num_patches,) - row indices
+        cols: torch.Tensor of shape (num_patches,) - column indices
+        grid_h: int - height of patch grid
+        grid_w: int - width of patch grid
+    """
+    # Calculate grid dimensions
+    grid_h = image_size - patch_size + 1  # 28-7+1 = 22
+    grid_w = image_size - patch_size + 1  # 22
+
+    # Create meshgrid of row and column indices
+    rows = torch.arange(grid_h, device=device)
+    cols = torch.arange(grid_w, device=device)
+
+    # Create all combinations (meshgrid then flatten)
+    # This matches the order of F.unfold (row-major)
+    grid_rows, grid_cols = torch.meshgrid(rows, cols, indexing='ij')
+
+    # Flatten to get coordinates for each patch in order
+    rows_flat = grid_rows.reshape(-1)  # (484,)
+    cols_flat = grid_cols.reshape(-1)  # (484,)
+
+    return rows_flat, cols_flat, grid_h, grid_w
+
+
+def get_patch_coordinates_batch(batch_size, image_size=28, patch_size=7, stride=1, device='cpu'):
+    """
+    Get row and column coordinates for all patches, expanded for batch.
+
+    Args:
+        batch_size: int - batch size
+        image_size: int - size of input image
+        patch_size: int - size of patches
+        stride: int - stride for unfolding
+        device: torch device
+
+    Returns:
+        rows: torch.Tensor of shape (batch_size, num_patches) - row indices
+        cols: torch.Tensor of shape (batch_size, num_patches) - column indices
+        grid_h: int - height of patch grid
+        grid_w: int - width of patch grid
+        num_patches: int - total number of patches
+    """
+    # Get base coordinates
+    rows, cols, grid_h, grid_w = get_patch_coordinates(
+        image_size, patch_size, stride, device
+    )
+
+    num_patches = rows.shape[0]  # 484 for MNIST
+
+    # Expand for batch
+    rows_batch = rows.unsqueeze(0).expand(batch_size, -1)  # (B, 484)
+    cols_batch = cols.unsqueeze(0).expand(batch_size, -1)  # (B, 484)
+
+    return rows_batch, cols_batch, grid_h, grid_w, num_patches
+
 

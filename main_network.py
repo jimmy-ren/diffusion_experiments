@@ -16,6 +16,7 @@ class Unet(nn.Module):
                  up_ch: list[int] = [256, 256, 256, 128],
                  down_sample: list[bool] = [True, True, False],
                  t_emb_dim: int = 128,
+                 p_emb_dim: int = 0,
                  num_downc_layers :int = 2,
                  num_midc_layers :int = 2,
                  num_upc_layers :int = 2,
@@ -28,6 +29,7 @@ class Unet(nn.Module):
         self.mid_ch = mid_ch
         self.up_ch = up_ch
         self.t_emb_dim = t_emb_dim
+        self.p_emb_dim = p_emb_dim
         self.down_sample = down_sample
         self.num_downc_layers = num_downc_layers
         self.num_midc_layers = num_midc_layers
@@ -62,12 +64,20 @@ class Unet(nn.Module):
             nn.Linear(self.t_emb_dim, self.t_emb_dim)
         )
 
+        # Initial Positional Embedding Projection
+        self.p_proj = nn.Sequential(
+            nn.Linear(self.p_emb_dim, self.p_emb_dim),
+            nn.SiLU(),
+            nn.Linear(self.p_emb_dim, self.p_emb_dim)
+        ) if p_emb_dim > 0 else nn.Identity()
+
         # DownC Blocks
         self.downs = nn.ModuleList([
             DownC(
                 self.down_ch[i],
                 self.down_ch[i+1],
                 self.t_emb_dim,
+                self.p_emb_dim,
                 self.num_downc_layers,
                 self.down_sample[i],
                 self.enable_down_attention[i]
@@ -80,6 +90,7 @@ class Unet(nn.Module):
                 self.mid_ch[i],
                 self.mid_ch[i+1],
                 self.t_emb_dim,
+                self.p_emb_dim,
                 self.num_midc_layers,
                 self.enable_mid_attention[i]
             ) for i in range(len(self.mid_ch) - 1)
@@ -92,6 +103,7 @@ class Unet(nn.Module):
                 self.up_ch[i+1],
                 self.down_ch[len(self.down_ch)-i-2],
                 self.t_emb_dim,
+                self.p_emb_dim,
                 self.num_upc_layers,
                 self.up_sample[i],
                 self.enable_up_attention[i]
@@ -104,7 +116,7 @@ class Unet(nn.Module):
             nn.Conv2d(self.up_ch[-1], self.im_channels, kernel_size=3, padding=1)
         )
 
-    def forward(self, x, t):
+    def forward(self, x, t, pos=None):
 
         out = self.cv1(x)
 
@@ -112,21 +124,29 @@ class Unet(nn.Module):
         t_emb = get_time_embedding(t, self.t_emb_dim)
         t_emb = self.t_proj(t_emb)
 
+        if pos is not None:
+            p_emb_x = get_time_embedding(pos[:,0], self.p_emb_dim // 2)
+            p_emb_y = get_time_embedding(pos[:,1], self.p_emb_dim // 2)
+            p_emb = torch.cat([p_emb_x, p_emb_y], dim=1)
+            p_emb = self.p_proj(p_emb)
+        else:
+            p_emb = None
+
         # DownC outputs
         down_outs = []
 
         for down in self.downs:
             down_outs.append(out)
-            out = down(out, t_emb)
+            out = down(out, t_emb, p_emb)
 
         # MidC outputs
         for mid in self.mids:
-            out = mid(out, t_emb)
+            out = mid(out, t_emb, p_emb)
 
         # UpC Blocks
         for up in self.ups:
             down_out = down_outs.pop()
-            out = up(out, down_out, t_emb)
+            out = up(out, down_out, t_emb, p_emb)
 
         # Final Conv
         out = self.cv2(out)

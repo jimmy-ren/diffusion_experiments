@@ -1,5 +1,6 @@
 import torch.nn as nn
 from aux_funs import *
+import torch.nn.functional as F
 
 class NormActConv(nn.Module):
     """
@@ -236,6 +237,7 @@ class DownC(nn.Module):
                  in_channels: int,
                  out_channels: int,
                  t_emb_dim: int = 128,  # Time Embedding Dimension
+                 p_emb_dim: int = 0,
                  num_layers: int = 2,
                  down_sample: bool = True,  # True for Downsampling
                  enable_attention: bool = True
@@ -261,6 +263,11 @@ class DownC(nn.Module):
             TimeEmbedding(out_channels, t_emb_dim) for _ in range(num_layers)
         ])
 
+        # positional embedding if needed
+        self.pe_block = nn.ModuleList([
+            TimeEmbedding(out_channels, p_emb_dim) for _ in range(num_layers)
+        ]) if p_emb_dim > 0 else nn.Identity()
+
         self.attn_block = nn.ModuleList([
             SelfAttentionBlock(out_channels) for _ in range(num_layers)
         ])
@@ -275,7 +282,7 @@ class DownC(nn.Module):
             ) for i in range(num_layers)
         ])
 
-    def forward(self, x, t_emb):
+    def forward(self, x, t_emb, p_emb=None):
         out = x
 
         for i in range(self.num_layers):
@@ -284,6 +291,8 @@ class DownC(nn.Module):
             # Resnet Block
             out = self.conv1[i](out)
             out = out + self.te_block[i](t_emb)[:, :, None, None]
+            if p_emb is not None:
+                out = out + self.pe_block[i](p_emb)[:, :, None, None]
             out = self.conv2[i](out)
             out = out + self.res_block[i](resnet_input)
 
@@ -311,6 +320,7 @@ class MidC(nn.Module):
                  in_channels: int,
                  out_channels: int,
                  t_emb_dim: int = 128,
+                 p_emb_dim: int = 0,
                  num_layers: int = 2,
                  enable_attention: bool = True
                  ):
@@ -335,6 +345,11 @@ class MidC(nn.Module):
             TimeEmbedding(out_channels, t_emb_dim) for _ in range(num_layers + 1)
         ])
 
+        # positional embedding if needed
+        self.pe_block = nn.ModuleList([
+            TimeEmbedding(out_channels, p_emb_dim) for _ in range(num_layers + 1)
+        ]) if p_emb_dim > 0 else nn.Identity()
+
         self.attn_block = nn.ModuleList([
             SelfAttentionBlock(out_channels) for _ in range(num_layers)
         ])
@@ -347,13 +362,15 @@ class MidC(nn.Module):
             ) for i in range(num_layers + 1)
         ])
 
-    def forward(self, x, t_emb):
+    def forward(self, x, t_emb, p_emb=None):
         out = x
 
         # First-Resnet Block
         resnet_input = out
         out = self.conv1[0](out)
         out = out + self.te_block[0](t_emb)[:, :, None, None]
+        if p_emb is not None:
+            out = out + self.pe_block[0](p_emb)[:, :, None, None]
         out = self.conv2[0](out)
         out = out + self.res_block[0](resnet_input)
 
@@ -368,6 +385,8 @@ class MidC(nn.Module):
             resnet_input = out
             out = self.conv1[i + 1](out)
             out = out + self.te_block[i + 1](t_emb)[:, :, None, None]
+            if p_emb is not None:
+                out = out + self.pe_block[i + 1](p_emb)[:, :, None, None]
             out = self.conv2[i + 1](out)
             out = out + self.res_block[i + 1](resnet_input)
 
@@ -390,6 +409,7 @@ class UpC(nn.Module):
                  out_channels: int,
                  skip_connect_channels: int,
                  t_emb_dim: int = 128,  # Time Embedding Dimension
+                 p_emb_dim: int = 0,
                  num_layers: int = 2,
                  up_sample: bool = True,  # True for Upsampling
                  enable_attention: bool = True
@@ -415,6 +435,11 @@ class UpC(nn.Module):
             TimeEmbedding(out_channels, t_emb_dim) for _ in range(num_layers)
         ])
 
+        # positional embedding if needed
+        self.pe_block = nn.ModuleList([
+            TimeEmbedding(out_channels, p_emb_dim) for _ in range(num_layers)
+        ]) if p_emb_dim > 0 else nn.Identity()
+
         self.attn_block = nn.ModuleList([
             SelfAttentionBlock(out_channels) for _ in range(num_layers)
         ])
@@ -429,7 +454,7 @@ class UpC(nn.Module):
             ) for i in range(num_layers)
         ])
 
-    def forward(self, x, down_out, t_emb):
+    def forward(self, x, down_out, t_emb, p_emb=None):
         # Upsampling
         x = self.up_block(x)
         x = torch.cat([x, down_out], dim=1)
@@ -441,6 +466,8 @@ class UpC(nn.Module):
             # Resnet Block
             out = self.conv1[i](out)
             out = out + self.te_block[i](t_emb)[:, :, None, None]
+            if p_emb is not None:
+                out = out + self.pe_block[i](p_emb)[:, :, None, None]
             out = self.conv2[i](out)
             out = out + self.res_block[i](resnet_input)
 
@@ -450,3 +477,111 @@ class UpC(nn.Module):
                 out = out + out_attn
 
         return out
+
+
+class MidAndSampling(nn.Module):
+
+    def __init__(self, latent_dim):
+        super(MidAndSampling, self).__init__()
+        self.fc1 = nn.Linear(256*7*7, 256)
+        self.fc2 = nn.Linear(256, latent_dim*2)
+        self.fc3 = nn.Linear(latent_dim, latent_dim*2)
+        self.fc4 = nn.Linear(latent_dim*2, 256)
+        self.fc5 = nn.Linear(256, 256*7*7)
+
+    def forward(self, x):
+        # x is in the form of ncwh
+        x = x.view(-1, 256*7*7)
+        x = F.relu(self.fc1(x))
+        # predicts mean µ and log(σ²)
+        pred_params = self.fc2(x)
+        # mean µ
+        pred_mean = pred_params[:, 0:int(pred_params.size(1) / 2)]
+        # log(σ²)
+        pred_log_variance = pred_params[:, int(pred_params.size(1) / 2):]
+        # σ²
+        pred_variance = torch.exp(pred_log_variance)
+        # σ
+        pred_sd = torch.sqrt(pred_variance)
+        # draw sample from standard Gaussian
+        latent_samples = torch.randn(pred_params.size(0), int(pred_params.size(1) / 2))
+        latent_samples = latent_samples.to(pred_params.device)
+        # re-parametrization
+        latent_samples = pred_mean + latent_samples * pred_sd
+        x = F.relu(self.fc3(latent_samples))
+        x = F.relu(self.fc4(x))
+        out = F.relu(self.fc5(x))
+        out = out.view(-1, 256, 7, 7)
+
+        return pred_mean, pred_variance, out
+
+class KernelPrediction(nn.Module):
+
+    def __init__(self, latent_dim):
+        super(KernelPrediction, self).__init__()
+
+    def forward(self, normalized_coord, input_img, filter_bank, buddy_filter=None):
+        #coord = latent_embedding[0]
+        #normalized_coord = normalize_mu(coord, assumed_range=(-3, 3))
+        #normalized_coord = normalize_mu(coord, assumed_range=(-2.8, 2.8))
+        #normalized_coord = normalize_mu(coord, assumed_range=(-2.5, 2.5))
+        #normalized_coord = normalize_mu(coord, assumed_range=(-1.7, 1.7))
+
+        '''
+        # analysis of vae coordinate normalization
+        c = coord.to('cpu').detach().numpy()
+        c_dim1 = c[:,2]
+        c_dim1.sort()
+        part_dim1 = int(len(c_dim1) * 0.985)
+        c_dim1 = c_dim1[len(c_dim1)-part_dim1:part_dim1]
+        m = max(c_dim1)
+        mm = min(c_dim1)
+        n = normalized_coord.to('cpu').detach().numpy()
+        '''
+
+        grid_coords = normalized_coord.unsqueeze(1).unsqueeze(1).unsqueeze(1)
+
+        # duplicate the filter bank for batch_size times
+        filter_bank = filter_bank.repeat(input_img.size()[0], 1, 1, 1, 1)
+
+        # Perform grid sampling
+        sampled_filters = F.grid_sample(
+            input=filter_bank,  # [100, 49, 8, 3, 3] - the filter bank
+            grid=grid_coords,  # [100, 1, 1, 1, 3] - normalized coordinates
+            align_corners=True,  # Important: maps exactly to grid corners
+            mode='bilinear',  # Actually trilinear for 3D
+            padding_mode='border'  # How to handle out-of-bound coordinates
+        )
+
+        sampled_filters = sampled_filters.squeeze(-1).squeeze(-1).squeeze(-1)
+
+        input_img = input_img.view(-1, sampled_filters.shape[1])
+        intermediate_center = 0
+        residual_signal = 0
+        if buddy_filter is not None:
+            intermediate_center = torch.linalg.vecdot(input_img, buddy_filter, dim=1)
+            residual_signal = torch.linalg.vecdot(input_img, sampled_filters, dim=1)
+            #intermediate = combine_filter_batches_pairwise(input_img, buddy_filter)
+            #residual_center = torch.linalg.vecdot(intermediate, sampled_filters, dim=1)
+            out_final = intermediate_center + residual_signal
+
+            #tmp = sampled_filters.cpu().numpy()
+
+            #final_filters = combine_filter_batches_pairwise(buddy_filter, sampled_filters)
+            #out_final = torch.linalg.vecdot(input_img, final_filters, dim=1)
+            final_filters = sampled_filters
+        else:
+            final_filters = sampled_filters
+            out_final = torch.linalg.vecdot(input_img, sampled_filters, dim=1)
+
+        return final_filters, out_final, intermediate_center, residual_signal
+
+class KLD_VAE_Loss(nn.Module):
+    def __init__(self):
+        super(KLD_VAE_Loss, self).__init__()
+
+    def forward(self, pred_mean, pred_variance):
+        loss = -torch.log(torch.sqrt(pred_variance)) + (pred_variance + pred_mean.pow(2)) / 2 - 0.5
+        #tmp = -0.5 * torch.sum(1 + torch.log(pred_variance) - pred_mean.pow(2) - pred_variance)
+        loss = torch.sum(loss) / loss.shape[0]
+        return loss
