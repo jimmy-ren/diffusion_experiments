@@ -240,7 +240,8 @@ class DownC(nn.Module):
                  p_emb_dim: int = 0,
                  num_layers: int = 2,
                  down_sample: bool = True,  # True for Downsampling
-                 enable_attention: bool = True
+                 enable_attention: bool = True,
+                 enable_dropout: bool = True
                  ):
         super(DownC, self).__init__()
 
@@ -249,13 +250,15 @@ class DownC(nn.Module):
 
         self.conv1 = nn.ModuleList([
             NormActConv(in_channels if i == 0 else out_channels,
-                        out_channels
+                        out_channels,
+                        dropout=enable_dropout
                         ) for i in range(num_layers)
         ])
 
         self.conv2 = nn.ModuleList([
             NormActConv(out_channels,
-                        out_channels
+                        out_channels,
+                        dropout=enable_dropout
                         ) for _ in range(num_layers)
         ])
 
@@ -322,7 +325,8 @@ class MidC(nn.Module):
                  t_emb_dim: int = 128,
                  p_emb_dim: int = 0,
                  num_layers: int = 2,
-                 enable_attention: bool = True
+                 enable_attention: bool = True,
+                 enable_dropout: bool = True
                  ):
         super(MidC, self).__init__()
 
@@ -331,13 +335,15 @@ class MidC(nn.Module):
 
         self.conv1 = nn.ModuleList([
             NormActConv(in_channels if i == 0 else out_channels,
-                        out_channels
+                        out_channels,
+                        dropout=enable_dropout
                         ) for i in range(num_layers + 1)
         ])
 
         self.conv2 = nn.ModuleList([
             NormActConv(out_channels,
-                        out_channels
+                        out_channels,
+                        dropout=enable_dropout
                         ) for _ in range(num_layers + 1)
         ])
 
@@ -412,7 +418,8 @@ class UpC(nn.Module):
                  p_emb_dim: int = 0,
                  num_layers: int = 2,
                  up_sample: bool = True,  # True for Upsampling
-                 enable_attention: bool = True
+                 enable_attention: bool = True,
+                 enable_dropout: bool = True
                  ):
         super(UpC, self).__init__()
 
@@ -421,13 +428,15 @@ class UpC(nn.Module):
 
         self.conv1 = nn.ModuleList([
             NormActConv(in_channels+skip_connect_channels if i == 0 else out_channels,
-                        out_channels
+                        out_channels,
+                        dropout=enable_dropout
                         ) for i in range(num_layers)
         ])
 
         self.conv2 = nn.ModuleList([
             NormActConv(out_channels,
-                        out_channels
+                        out_channels,
+                        dropout=enable_dropout
                         ) for _ in range(num_layers)
         ])
 
