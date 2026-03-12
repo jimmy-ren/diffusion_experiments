@@ -11,6 +11,7 @@ class Unet(nn.Module):
 
     def __init__(self,
                  im_channels: int = 1, # RGB
+                 out_channels: int = None,
                  down_ch: list = [128, 256, 256, 256],
                  mid_ch: list = [256, 256, 256],
                  up_ch: list[int] = [256, 256, 256, 128],
@@ -25,6 +26,10 @@ class Unet(nn.Module):
         super(Unet, self).__init__()
 
         self.im_channels = im_channels
+        if out_channels is None:
+            self.out_channels = im_channels
+        else:
+            self.out_channels = out_channels
         self.down_ch = down_ch
         self.mid_ch = mid_ch
         self.up_ch = up_ch
@@ -113,7 +118,7 @@ class Unet(nn.Module):
         # Final Convolution
         self.cv2 = nn.Sequential(
             nn.GroupNorm(8, self.up_ch[-1]),
-            nn.Conv2d(self.up_ch[-1], self.im_channels, kernel_size=3, padding=1)
+            nn.Conv2d(self.up_ch[-1], self.out_channels, kernel_size=3, padding=1)
         )
 
     def forward(self, x, t, pos=None):
