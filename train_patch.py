@@ -6,9 +6,10 @@ import torchvision.transforms as transforms
 import time
 from main_vae_network import *
 from main_network import *
+from naive_kpn import *
 
 #some config
-num_epochs = 100
+num_epochs = 500
 batch_size = 100
 learning_rate = 0.0002
 n_diff_steps = 100
@@ -28,8 +29,9 @@ print(f'total epochs: {num_epochs}, diff steps: {n_diff_steps}')
 print(f'dataset: {dataset}, batch_size: {batch_size}, label type: {label_type}, learning rate: {learning_rate}')
 
 if dataset == 'MNIST':
+    kernel_size = 7
     t = transforms.Compose([
-        #transforms.Pad(padding=2, fill=0, padding_mode='constant'),
+        transforms.Pad(padding=kernel_size//2, fill=0, padding_mode='constant'),
         #transforms.CenterCrop((8,8)),
         #transforms.RandomCrop(size=(32, 32)),
         transforms.ToTensor(),
@@ -47,8 +49,7 @@ if dataset == 'MNIST':
     # Create a subset with only the target class
     single_class_dataset = torch.utils.data.Subset(train_dataset, indices)
 
-    kernel_size = 7
-    rows_batch, cols_batch, grid_h, grid_w, num_patches = get_patch_coordinates_batch(batch_size, 28, 7)
+    rows_batch, cols_batch, grid_h, grid_w, num_patches = get_patch_coordinates_batch(batch_size, 28+kernel_size-1, 7)
     rows_flat = rows_batch.reshape(-1, 1)
     cols_flat = cols_batch.reshape(-1, 1)
     rows_cols = torch.cat([rows_flat, cols_flat], dim=1)
@@ -66,10 +67,10 @@ else:
     sys.exit('Invalid dataset')
 
 # Data loader
-#train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 
 # Create a DataLoader for the single-class dataset
-train_loader = torch.utils.data.DataLoader(single_class_dataset, batch_size=batch_size, shuffle=True)
+#train_loader = torch.utils.data.DataLoader(single_class_dataset, batch_size=batch_size, shuffle=True)
 
 # device
 #torch.cuda.empty_cache()
@@ -80,7 +81,9 @@ print('using device:', dn)
 
 if dataset == 'MNIST':
     #model = VAENet(im_channels=1, enable_attention=False)
-    model = Unet(im_channels=1, attention_mode='OFF', down_sample=[False, False, False], p_emb_dim=64)
+    #model = Unet(im_channels=3, out_channels=1, attention_mode='OFF', down_sample=[False, False, False], p_emb_dim=64)
+    model = NaiveKPN(im_channels=3, out_channels=1, input_size=kernel_size, kernel_size=kernel_size, p_emb_dim=64,
+                     enable_dropout=True)
 elif dataset == 'CIFAR10':
     model = VAENet(im_channels=3, enable_attention=False)
 else:
@@ -133,20 +136,32 @@ for epoch in range(num_epochs):
 
         dup_n = int(input_unfold.shape[0] / current_batch_sz)
         random_step_unfold = torch.repeat_interleave(random_step, repeats=dup_n)
+        # Get global context (noisy) by downsampling the entire image
+        global_context_n = F.interpolate(noisy_image_batch, size=kernel_size, mode='area')
+        global_context_n = torch.repeat_interleave(global_context_n, repeats=dup_n, dim=0)
+        # Get global context (gt) by downsampling the entire image
+        global_context_gt = F.interpolate(image_batch, size=kernel_size, mode='area')
+        global_context_gt = torch.repeat_interleave(global_context_gt, repeats=dup_n, dim=0)
 
         permutation = torch.randperm(input_unfold.shape[0])
         permutation = permutation[0:1000]
         input_unfold = input_unfold[permutation, :, :, :]
         random_step_unfold = random_step_unfold[permutation]
+        rows_cols_perm = rows_cols[permutation, :]
+        global_context_n = global_context_n[permutation, :, :, :]
+        global_context_gt = global_context_gt[permutation, :, :, :]
 
         input_unfold = input_unfold.to(device)
         random_step_unfold = random_step_unfold.to(device)
-
-        rows_cols_perm = rows_cols[permutation, :]
         rows_cols_perm = rows_cols_perm.to(device)
+        global_context_n = global_context_n.to(device)
+        global_context_gt = global_context_gt.to(device)
 
+        combined_input = torch.cat([input_unfold, global_context_n, global_context_gt], dim=1)
         # forward
-        outputs = model(input_unfold, random_step_unfold, rows_cols_perm)
+        #outputs = model(combined_input, random_step_unfold, rows_cols_perm)
+        # KPN
+        _, outputs = model(combined_input, random_step_unfold, rows_cols_perm)
 
         if label_type == 'image':
             gt = images
@@ -164,9 +179,12 @@ for epoch in range(num_epochs):
         gt_unfold = gt_unfold[permutation, :, :, :]
 
         gt_unfold = gt_unfold.to(device)
-        #start_pos = int((kernel_size - 1) / 2)
-        #loss = criterion(outputs[:,:,start_pos:start_pos+1,start_pos:start_pos+1], gt_unfold[:,:,start_pos:start_pos+1,start_pos:start_pos+1])
+
+        start_pos = int((kernel_size - 1) / 2)
+        gt_unfold = gt_unfold[:, :, start_pos:start_pos + 1, start_pos:start_pos + 1]
+        outputs = outputs.view(gt_unfold.shape)
         loss = criterion(outputs, gt_unfold)
+        #loss = criterion(outputs, gt_unfold)
 
         '''
         for i in range(6):
